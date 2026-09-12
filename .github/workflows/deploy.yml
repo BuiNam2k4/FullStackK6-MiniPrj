@@ -1,157 +1,43 @@
-name: CI/CD Pipeline
+name: Build & Deploy
 
 on:
   push:
     branches: [main]
-  pull_request:
-    branches: [main]
-
-env:
-  IMAGE_NAME: team-mini-app
-  REGISTRY: ghcr.io
 
 jobs:
-  # ─────────────────────────────────────────────
-  # JOB 1: CI - Build & Test
-  # ─────────────────────────────────────────────
-  build-and-test:
+  build:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: "20"
-          cache: "npm"
+      - name: Build Docker image
+        run: docker build -t team-mini-app:${{ github.sha }} .
 
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Run app in background for smoke test
-        run: |
-          npm start &
-          sleep 3
-
-      - name: Health check
-        run: |
-          response=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:3000/health)
-          if [ "$response" -ne 200 ]; then
-            echo "Health check failed with status $response"
-            exit 1
-          fi
-          echo "Health check passed"
-
-      - name: Test /api/info endpoint
-        run: |
-          response=$(curl -s http://localhost:3000/api/info)
-          echo "$response"
-          echo "$response" | grep -q '"status":"running"'
-          echo "API info endpoint OK"
-
-      - name: Test /api/members endpoint
-        run: |
-          response=$(curl -s http://localhost:3000/api/members)
-          echo "$response"
-          echo "$response" | grep -q '"members"'
-          echo "API members endpoint OK"
-
-  # ─────────────────────────────────────────────
-  # JOB 2: Docker Build & Push (chỉ trên main)
-  # ─────────────────────────────────────────────
-  docker-build-push:
-    needs: build-and-test
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      packages: write
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Login to GitHub Container Registry
-        uses: docker/login-action@v3
-        with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Extract metadata (tags, labels)
-        id: meta
-        uses: docker/metadata-action@v5
-        with:
-          images: ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ env.IMAGE_NAME }}
-          tags: |
-            type=sha,prefix=
-            type=raw,value=latest
-
-      - name: Build and push Docker image
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-
-      - name: Print image info
-        run: |
-          echo "Image pushed to: ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ env.IMAGE_NAME }}"
-          echo "Tags: latest, ${{ github.sha }}"
-
-  # ─────────────────────────────────────────────
-  # JOB 3: Deploy (chỉ trên main, sau khi push image)
-  # ─────────────────────────────────────────────
   deploy:
-    needs: docker-build-push
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: build
     runs-on: ubuntu-latest
-
+    if: ${{ vars.ENABLE_DEPLOY == 'true' }}
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Deploy to server via SSH
+      - name: Deploy over SSH
         uses: appleboy/ssh-action@v1.0.3
         with:
-          host: ${{ secrets.SERVER_HOST }}
-          username: ${{ secrets.SERVER_USER }}
-          key: ${{ secrets.SERVER_SSH_KEY }}
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          password: ${{ secrets.SSH_PASSWORD }}
+          port: ${{ secrets.SSH_PORT || 22 }}
           script: |
-            cd /opt/team-mini-app || mkdir -p /opt/team-mini-app && cd /opt/team-mini-app
-
-            # Pull latest image
-            docker pull ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ env.IMAGE_NAME }}:latest
-
-            # Stop old container if exists
-            docker stop team-mini-app 2>/dev/null || true
-            docker rm team-mini-app 2>/dev/null || true
-
-            # Run new container
-            docker run -d \
-              --name team-mini-app \
-              --restart unless-stopped \
-              -p 3000:3000 \
-              -e NODE_ENV=production \
-              ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ env.IMAGE_NAME }}:latest
-
-            # Verify deployment
-            sleep 5
-            docker ps | grep team-mini-app
-            echo "Deployment completed successfully!"
+            cd /root/FullStackK6-MiniPrj
+            git pull origin main
+            docker compose up -d --build
+            docker compose ps
 
       - name: Verify deployment
         uses: appleboy/ssh-action@v1.0.3
         with:
-          host: ${{ secrets.SERVER_HOST }}
-          username: ${{ secrets.SERVER_USER }}
-          key: ${{ secrets.SERVER_SSH_KEY }}
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          password: ${{ secrets.SSH_PASSWORD }}
+          port: ${{ secrets.SSH_PORT || 22 }}
           script: |
-            response=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:3000/health)
-            if [ "$response" -ne 200 ]; then
-              echo "Deployment verification failed!"
-              exit 1
-            fi
-            echo "Deployment verified - app is healthy!"
+            curl -f http://localhost:3000/health

@@ -1,4 +1,5 @@
 const express = require("express");
+const path = require("path");
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -12,9 +13,7 @@ const MEMBERS = [
   { role: "CI/CD", name: "Minh Quốc" },
 ];
 
-app.get("/", (req, res) => {
-  res.json({ message: "Team mini app API is running" });
-});
+app.use(express.static(path.join(__dirname, "..", "public")));
 
 app.get("/api/info", (req, res) => {
   res.json({

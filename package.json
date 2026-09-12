@@ -1,0 +1,13 @@
+{
+  "name": "team-mini-app",
+  "version": "1.0.0",
+  "description": "Mini web app giới thiệu nhóm thực hành DevOps/Fullstack",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js"
+  },
+  "dependencies": {
+    "express": "^4.19.2"
+  }
+}

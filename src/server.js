@@ -12,7 +12,6 @@ const MEMBERS = [
   { role: "DevOps", name: "Hiếu Lê" },
   { role: "CI/CD", name: "Minh Quốc" },
 ];
-
 app.use(express.static(path.join(__dirname, "..", "public")));
 
 app.get("/api/info", (req, res) => {
